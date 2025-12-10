@@ -1,5 +1,5 @@
 # ======================================================================
-# ФАЙЛ: eraXChange.py (ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ С ИИ И КЭШИРОВАНИЕМ)
+# ФАЙЛ: eraXChange.py (ПОЛНЫЙ КОД С ИИ, КЭШИРОВАНИЕМ И WEBHOOKS)
 # ======================================================================
 
 import os
@@ -8,27 +8,32 @@ import telebot
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, jsonify
 import time
-import openai
-import json
+import openai  # <-- ДОБАВЛЕНО ДЛЯ ИИ
+import json    # <-- ДОБАВЛЕНО ДЛЯ РАБОТЫ С JSON ОТ ИИ
+import logging # <-- Для улучшения отладки на сервере
+
+# Настройка логирования
+logger = telebot.logger
+telebot.logger.setLevel(logging.INFO)
 
 # --- КОНФИГУРАЦИЯ И ЗАГРУЗКА КЛЮЧЕЙ ---
-# Загружаем переменные из .env
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 API_KEY = os.getenv("EXCHANGE_RATE_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # <-- КЛЮЧ ИИ
 API_BASE_URL = f"https://v6.exchangerate-api.com/v6/{API_KEY}/latest/"
 
-# Критическая проверка основных токенов
+# Критическая проверка токенов
 if not BOT_TOKEN or not API_KEY:
-    raise ValueError("❌ Ошибка: Ключи BOT_TOKEN или EXCHANGE_RATE_API_KEY не загружены. Проверьте .env")
+    raise ValueError("❌ Ошибка: Ключи BOT_TOKEN или EXCHANGE_RATE_API_KEY не загружены.")
 
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
-    print("✅ Ключ OpenAI загружен.")
+    print("✅ Ключ OpenAI загружен. Функции НЛП активны.")
 else:
     print("⚠️ Ключ OPENAI_API_KEY отсутствует. Функция НЛП будет недоступна.")
+
 
 # --- КЭШИРОВАНИЕ ДАННЫХ ---
 RATE_CACHE = {}
@@ -82,7 +87,7 @@ def get_exchange_rate(from_currency: str, to_currency: str):
         return rate, None
 
     except requests.exceptions.RequestException as e:
-        print(f"❌ Ошибка при запросе к API: {e}")
+        logger.error(f"❌ Ошибка при запросе к API: {e}")
         return None, "NETWORK_ERROR"
 
 
@@ -93,15 +98,15 @@ def parse_currency_query(text):
 
     prompt = f"""
     Извлеки сумму (amount), исходную валюту (from) и целевую валюту (to) из следующего запроса пользователя. 
-    Используй коды ISO 4217 (USD, KZT, EUR). Если целевая валюта не указана, используй 'KZT' по умолчанию. 
-    Ответ дай ТОЛЬКО в формате JSON, без пояснений:
+    Используй коды ISO 4217 (USD, KZT, EUR, RUB и т.д.). Если целевая валюта не указана, используй 'KZT' по умолчанию. 
+    Ответ дай ТОЛЬКО в формате JSON, без пояснений. Пример: {{ "amount": 100, "from": "USD", "to": "KZT" }}
     Запрос: "{text}"
     """
 
     try:
-        # Просим ИИ выдать результат в формате JSON
+        # Используем модель, которая поддерживает надежный JSON-формат
         response = openai.chat.completions.create(
-            model="gpt-3.5-turbo-1106",  # Указываем модель, поддерживающую JSON response_format
+            model="gpt-3.5-turbo-1106",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )
@@ -110,12 +115,12 @@ def parse_currency_query(text):
         return json.loads(json_data), None
 
     except Exception as e:
-        print(f"❌ Ошибка LLM при парсинге: {e}")
+        logger.error(f"❌ Ошибка LLM при парсинге: {e}")
         return None, "LLM_ERROR"
 
 
 # ======================================================================
-# 3. НАСТРОЙКА АДРЕСОВ И ПУТЕЙ (ИСПРАВЛЕНО)
+# 3. НАСТРОЙКА АДРЕСОВ И ПУТЕЙ
 # ======================================================================
 
 SERVER_HOST = get_server_url()
@@ -136,6 +141,7 @@ def serve_web_app():
 
 @app.route('/api/exchange', methods=['POST'])
 def exchange_api():
+    # ... (Оставляем существующую логику API)
     data = request.json
     try:
         amount = float(data.get('amount', 0))
@@ -195,13 +201,14 @@ def send_menu(message):
 
     bot.send_message(
         message.chat.id,
-        "Нажмите кнопку ниже, чтобы открыть мини-приложение для конвертации. Вы также можете просто написать сумму и валюту (например: 100 долларов в тенге).",
+        "Нажмите кнопку ниже, чтобы открыть мини-приложение. Вы также можете просто написать сумму и валюту (например: 100 долларов в тенге).",
         reply_markup=markup
     )
 
 
 @bot.message_handler(content_types=['text'])
 def handle_text_query(message):
+    """Обрабатывает текстовые запросы пользователя с помощью ИИ."""
     if not OPENAI_API_KEY:
         bot.send_message(message.chat.id, "❌ Функция текстового запроса недоступна: отсутствует ключ ИИ.")
         return
@@ -209,8 +216,10 @@ def handle_text_query(message):
     chat_id = message.chat.id
     query_text = message.text
 
+    # Сигнализируем, что бот обрабатывает запрос
     bot.send_chat_action(chat_id, 'typing')
 
+    # Шаг 1: Парсинг через ИИ
     params, error = parse_currency_query(query_text)
 
     if error == "LLM_ERROR" or params is None:
@@ -218,15 +227,15 @@ def handle_text_query(message):
         return
 
     try:
-        # Параметры приходят в виде {amount: 100, from: 'USD', to: 'KZT'}
+        # Извлечение параметров из JSON
         amount = float(params.get('amount'))
         from_currency = params.get('from', 'USD').upper()
         to_currency = params.get('to', 'KZT').upper()
-    except:
-        bot.send_message(chat_id,
-                         "Не могу распознать сумму, исходную или целевую валюту. Убедитесь, что запрос четкий (например, '100 USD в KZT').")
+    except (ValueError, TypeError):
+        bot.send_message(chat_id, "Не могу распознать сумму. Убедитесь, что запрос четкий (например: '100 USD в KZT').")
         return
 
+    # Шаг 2: Выполнение конвертации
     rate, conv_error = get_exchange_rate(from_currency, to_currency)
 
     if conv_error:
@@ -235,20 +244,42 @@ def handle_text_query(message):
 
     result = amount * rate
 
-    response_text = f"🤖 Расчет по запросу:\n**{amount:,.2f} {from_currency}** = **{result:,.2f} {to_currency}**\nТекущий курс: 1 {from_currency} = {rate:,.4f} {to_currency}"
+    # Шаг 3: Отправка результата
+    response_text = (
+        f"🤖 Расчет по запросу:\n"
+        f"**{amount:,.2f} {from_currency}** = **{result:,.2f} {to_currency}**\n"
+        f"Текущий курс: 1 {from_currency} = {rate:,.4f} {to_currency}"
+    )
     bot.send_message(chat_id, response_text, parse_mode='Markdown')
 
 
 # ======================================================================
-# 6. ЗАПУСК (ТОЛЬКО ДЛЯ ЛОКАЛЬНОГО ТЕСТА!)
+# 6. ЗАПУСК И НАСТРОЙКА WEBHOOKS
 # ======================================================================
 
+def setup_webhook():
+    """Настраивает вебхук для работы на Render."""
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=WEBHOOK_URL)
+        logger.info(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при настройке Webhook: {e}")
+
+
 if __name__ == '__main__':
-    # Обязательно сбрасываем старый вебхук перед polling
+    # Эта часть используется для ЛОКАЛЬНОГО тестирования (Polling)
     try:
         bot.remove_webhook()
     except Exception as e:
-        print(f"❌ Ошибка при удалении вебхука (Проверьте токен, если ошибка Logged out): {e}")
+        logger.error(f"❌ Ошибка при удалении вебхука: {e}")
 
     print("🤖 Бот запущен в режиме Polling (локальный тест)...")
+    # Используйте эту строку для локального запуска
     bot.polling(non_stop=True, interval=0)
+
+else:
+    # Эта часть выполняется, когда приложение запускается на Render через Gunicorn
+    print("🚀 Приложение запущено на Render (Gunicorn). Настройка Webhook...")
+    setup_webhook()
