@@ -27,6 +27,7 @@
             font-size: 16px;
             background-color: var(--tg-theme-secondary-bg-color, #f4f4f4);
             color: var(--tg-theme-text-color, #000000);
+            margin-bottom: 15px;
         }
 
         button {
@@ -39,11 +40,13 @@
             cursor: pointer;
             transition: background-color 0.2s;
             border: none;
+            margin-top: 5px; /* Для разделения от результата */
         }
 
+        /* Кнопка смены валют */
         .currency-control {
             display: flex;
-            align-items: center; /* Центрирование элементов по вертикали */
+            align-items: center;
             gap: 10px;
             margin-bottom: 20px;
         }
@@ -52,7 +55,7 @@
         }
 
         .swap-button {
-            width: 50px; /* Фиксированная ширина для кнопки обмена */
+            width: 50px;
             height: 50px;
             min-width: 50px;
             background-color: var(--tg-theme-secondary-bg-color);
@@ -66,6 +69,7 @@
             border: 1px solid var(--tg-theme-hint-color);
         }
 
+        /* Секция результата */
         #result {
             margin-top: 25px;
             padding: 20px;
@@ -90,8 +94,8 @@
             <div class="currency-input">
                 <label for="from_currency">ИЗ</label>
                 <select id="from_currency">
-                    <option value="USD">USD - Доллар США</option>
-                    <option value="KZT" selected>KZT - Тенге</option>
+                    <option value="USD" selected>USD - Доллар США</option>
+                    <option value="KZT">KZT - Тенге</option>
                     <option value="EUR">EUR - Евро</option>
                     <option value="RUB">RUB - Рубль</option>
                 </select>
@@ -102,8 +106,8 @@
             <div class="currency-input">
                 <label for="to_currency">В</label>
                 <select id="to_currency">
-                    <option value="USD" selected>USD - Доллар США</option>
-                    <option value="KZT">KZT - Тенге</option>
+                    <option value="USD">USD - Доллар США</option>
+                    <option value="KZT" selected>KZT - Тенге</option>
                     <option value="EUR">EUR - Евро</option>
                     <option value="RUB">RUB - Рубль</option>
                 </select>
@@ -122,19 +126,14 @@
         const tg = window.Telegram.WebApp;
         tg.ready();
 
-        // Устанавливаем тему
-        document.body.style.backgroundColor = tg.themeParams.bg_color;
-
         function swapCurrencies() {
             const fromSelect = document.getElementById('from_currency');
             const toSelect = document.getElementById('to_currency');
 
-            // Меняем значения местами
             const temp = fromSelect.value;
             fromSelect.value = toSelect.value;
             toSelect.value = temp;
 
-            // Очищаем результат
             document.getElementById('result').innerHTML = '<h2>Валюты поменяны</h2>';
         }
 
@@ -155,6 +154,8 @@
             resultDiv.innerHTML = '<h2>Запрос к серверу...</h2>';
 
             try {
+                // Примечание: /api/exchange работает независимо от HOSTING_URL,
+                // так как это относительный путь внутри WebApp.
                 const response = await fetch('/api/exchange', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -165,6 +166,7 @@
 
                 if (data.error) {
                     resultDiv.innerHTML = `<h2>❌ Ошибка</h2>${data.error}`;
+                    tg.showAlert(`Ошибка: ${data.error}`);
                 } else {
                     const messageText = `✅ Конвертация:\n${amount} ${data.from} = ${data.result} ${data.to}\nКурс: 1 к ${data.rate}`;
 
@@ -172,14 +174,15 @@
                         <h2>✅ Готово</h2>
                         <div class="result-amount">${data.result} ${data.to}</div>
                         <small>Курс: 1 ${data.from} = ${data.rate} ${data.to}</small>
-                        <hr style="margin-top: 15px;">
+                        <hr style="margin-top: 15px; border-color: var(--tg-theme-secondary-bg-color);">
                         <button onclick="sendResultToChat('${messageText}')">Отправить в чат</button>
                     `;
                 }
 
             } catch (error) {
                 console.error('Fetch error:', error);
-                resultDiv.innerHTML = '<h2>❌ Сетевая ошибка</h2>Проверьте подключение или сервер.';
+                resultDiv.innerHTML = '<h2>❌ Сетевая ошибка</h2>Сервер не отвечает.';
+                tg.showAlert('Сетевая ошибка. Проверьте ваш сервер Render.');
             } finally {
                 button.innerText = 'Показать Результат';
                 button.disabled = false;
@@ -187,12 +190,11 @@
         }
 
         function sendResultToChat(text) {
-             if (tg.isExpanded) {
-                 // tg.sendData отправляет данные в чат и закрывает приложение
+             // sendData закрывает WebApp и отправляет текст в чат
+             if (tg.isExpanded && tg.sendData) {
                  tg.sendData(text);
              } else {
-                 // Для случаев, когда WebApp открыто не в полном режиме
-                 alert('Результат готов!');
+                 tg.showAlert('Результат готов, но приложение не может отправить его в чат.');
              }
         }
     </script>
