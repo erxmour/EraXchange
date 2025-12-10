@@ -1,5 +1,5 @@
 # ======================================================================
-# ФАЙЛ: eraXChange.py (Currency Exchange Assistant с Gemini)
+# ФАЙЛ: eraXChange.py (ФИНАЛЬНАЯ ЧИСТАЯ ВЕРСИЯ Currency Exchange Assistant)
 # ======================================================================
 
 import os
@@ -103,7 +103,6 @@ def parse_currency_query(text):
     if not gemini_client:
         return None, "API_KEY_MISSING"
 
-    # Улучшенный промпт для надежного парсинга
     prompt = f"""
     Задача: Извлечь числовую сумму (amount), исходную валюту (from) и целевую валюту (to) из текста.
     Правила:
@@ -127,7 +126,8 @@ def parse_currency_query(text):
         )
 
         json_data = response.text.strip()
-        # Удаление Markdown-блока, если Gemini его добавил
+
+        # Удаление Markdown-блока
         if json_data.startswith('```json') and json_data.endswith('```'):
             json_data = json_data.strip('```json').strip('```').strip()
 
@@ -137,7 +137,7 @@ def parse_currency_query(text):
         logger.error(f"❌ Ошибка Gemini API: {e}")
         return None, "GEMINI_API_ERROR"
     except json.JSONDecodeError:
-        logger.error(f"❌ Ошибка парсинга JSON от Gemini. Получен текст: {response.text}")
+        logger.error(f"❌ Ошибка парсинга JSON от Gemini. Получен текст: {json_data}")
         return None, "LLM_PARSE_ERROR"
     except Exception as e:
         logger.error(f"❌ Неизвестная ошибка ИИ при парсинге: {e}")
@@ -149,7 +149,6 @@ def get_chat_response(text):
     if not gemini_client:
         return "Извините, функция чата недоступна из-за отсутствия ключа Gemini."
 
-    # Инструкция, задающая роль и контекст проекта
     system_prompt = (
         "Ты — дружелюбный и компетентный ассистент по обмену валют для мобильного приложения "
         "'Currency Exchange Assistant'. Твоя цель — помогать пользователям с общими вопросами о валюте, "
@@ -193,7 +192,6 @@ def serve_web_app():
 
 @app.route('/api/exchange', methods=['POST'])
 def exchange_api():
-    # ... (логика API остается без изменений)
     data = request.json
     try:
         amount = float(data.get('amount', 0))
@@ -283,7 +281,6 @@ def handle_text_query(message):
 
     if not error and params is not None:
         try:
-            # Если сумма больше 0, считаем это конвертацией
             amount = float(params.get('amount', 0))
             is_conversion = amount > 0
         except:
@@ -316,7 +313,6 @@ def handle_text_query(message):
             bot.send_message(chat_id, response_text, parse_mode='Markdown')
 
         except Exception:
-            # Если произошла ошибка при конвертации, переключаемся в режим чата
             is_conversion = False
 
             # --- РЕЖИМ ЧАТА (если это не конвертация, ошибка парсинга или общий вопрос) ---
